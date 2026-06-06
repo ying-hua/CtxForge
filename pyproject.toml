@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ctxforge"
+version = "0.1.0"
+description = "DeepSeek-native Memory and Context Engineering runtime."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "CtxForge Contributors" }
+]
+dependencies = [
+  "httpx>=0.27",
+  "pydantic>=2.7",
+  "rich>=13.7",
+  "tomli>=2.0; python_version < '3.11'",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+]
+
+[project.scripts]
+ctxforge = "ctxforge.cli.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ctxforge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
