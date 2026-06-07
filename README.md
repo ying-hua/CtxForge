@@ -6,7 +6,7 @@ It is not another full coding agent. The goal is to provide reusable building
 blocks for agents that need stable context construction, layered memory, skill
 loading, and prefix-cache observability.
 
-## Phase 1
+## Phase 2
 
 The current implementation includes:
 
@@ -19,16 +19,23 @@ The current implementation includes:
 - stable prefix construction and SHA-256 snapshots
 - estimated token budgeting with optional section drop/truncation
 - context reports for runtime and inspection commands
-- placeholder memory, skill, model, and cache diff paths for later phases
+- SQLite-backed memory schema initialization
+- working memory and session summary storage APIs
+- long-term memory metadata storage and local keyword search
+- dynamic memory section injection into the context builder
+- `ctxforge memory add`, `ctxforge memory list`, and `ctxforge memory search`
+- placeholder skill, model, and cache diff paths for later phases
 
 ## Quick Start
 
 ```powershell
 python -m pip install -e ".[dev]"
 ctxforge config show
+ctxforge memory add "Use sqlite3 for early memory phases." --kind decision --source manual
+ctxforge memory search "sqlite memory"
 ctxforge run "Summarize the current project direction."
 ctxforge inspect context "Summarize the current project direction."
-pytest
+pytest -p no:cacheprovider
 ```
 
 ## Configuration

@@ -26,6 +26,18 @@ def test_dynamic_task_does_not_change_stable_prefix(tmp_path):
     assert first.rendered_prompt != second.rendered_prompt
 
 
+def test_can_disable_phase1_memory_placeholders(tmp_path):
+    built = ContextBuilder(CtxForgeSettings()).build(
+        task="Task.",
+        cwd=tmp_path,
+        include_memory_placeholders=False,
+    )
+
+    names = {section.name for section in built.sections}
+    assert "memory.retrieved" not in names
+    assert "session.working_memory" not in names
+
+
 def test_sections_sort_by_stability_priority_and_name(tmp_path):
     sections = [
         ContextSection("dynamic.low", "dynamic", 1, "d", "test"),

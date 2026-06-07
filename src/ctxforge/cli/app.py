@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 import typer
 from rich.console import Console
@@ -12,7 +14,8 @@ from rich.table import Table
 from ctxforge.config.settings import load_settings
 from ctxforge.context import ContextBuilder
 from ctxforge.logging import configure_logging
-from ctxforge.runtime.agent import RuntimeRequest, run_phase1
+from ctxforge.memory import MemoryRecord, MemoryStore
+from ctxforge.runtime.agent import RuntimeRequest, run_phase2
 
 app = typer.Typer(
     name="ctxforge",
@@ -21,6 +24,7 @@ app = typer.Typer(
 )
 config_app = typer.Typer(help="Inspect and manage CtxForge configuration.")
 inspect_app = typer.Typer(help="Inspect CtxForge runtime artifacts.")
+memory_app = typer.Typer(help="Inspect and manage CtxForge memory.")
 console = Console()
 
 
@@ -52,14 +56,14 @@ def run(
     session_id: Optional[str] = typer.Option(None, "--session-id", help="Reuse an existing session id."),
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="Override context token budget."),
 ) -> None:
-    """Run a task through the Phase 1 context-aware placeholder runtime."""
+    """Run a task through the Phase 2 memory-aware placeholder runtime."""
     settings = load_settings(
         project_dir=project_dir,
         cli_overrides={"context": {"max_tokens": max_tokens}} if max_tokens else None,
     )
     configure_logging(settings.logging.level)
 
-    result = run_phase1(
+    result = run_phase2(
         RuntimeRequest(
             task=task,
             cwd=project_dir,
@@ -72,7 +76,7 @@ def run(
 
     console.print(Panel(result.answer, title="CtxForge", border_style="cyan"))
 
-    table = Table(title="Phase 1 Runtime Report")
+    table = Table(title="Phase 2 Runtime Report")
     table.add_column("Field", style="bold")
     table.add_column("Value")
     table.add_row("session_id", result.session_id)
@@ -83,6 +87,141 @@ def run(
     table.add_row("context_tokens", str(result.context_report["total_estimated_tokens"]))
     table.add_row("stable_prefix_sha256", str(result.context_report["stable_prefix_sha256"]))
     table.add_row("memory_db_path", str(settings.memory.resolved_db_path(project_dir)))
+    table.add_row("memory_status", str(result.memory_report["status"]))
+    table.add_row("retrieved_memories", str(result.memory_report["retrieved_count"]))
+    table.add_row("working_memory_items", str(result.memory_report["working_count"]))
+    table.add_row("session_summary_present", str(bool(result.memory_report["summary_count"])))
+    console.print(table)
+
+
+@memory_app.command("add")
+def memory_add(
+    content: str = typer.Argument(..., help="Memory content to persist."),
+    project_dir: Path = typer.Option(
+        Path.cwd(),
+        "--project-dir",
+        "-C",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Project directory used for config discovery.",
+    ),
+    scope: str = typer.Option("project", "--scope", help="Memory scope: global, project, or session."),
+    kind: str = typer.Option("fact", "--kind", help="Memory kind: preference, fact, decision, summary, or working."),
+    source: str = typer.Option("manual", "--source", help="Source label for this memory."),
+    confidence: float = typer.Option(0.8, "--confidence", min=0.0, max=1.0, help="Confidence from 0 to 1."),
+    session_id: Optional[str] = typer.Option(None, "--session-id", help="Session id for session-scope memory."),
+) -> None:
+    """Persist a long-term memory record."""
+    settings = load_settings(project_dir=project_dir)
+    store = MemoryStore(settings.memory.resolved_db_path(project_dir))
+    store.initialize()
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    record = store.upsert_record(
+        MemoryRecord(
+            id=f"mem-{uuid4().hex[:16]}",
+            scope=scope,  # type: ignore[arg-type]
+            kind=kind,  # type: ignore[arg-type]
+            content=content,
+            source=source,
+            confidence=confidence,
+            session_id=session_id,
+            project_dir=str(project_dir) if scope in {"project", "session"} else None,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    console.print(f"Added memory {record.id}")
+
+
+@memory_app.command("list")
+def memory_list(
+    project_dir: Path = typer.Option(
+        Path.cwd(),
+        "--project-dir",
+        "-C",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Project directory used for config discovery.",
+    ),
+    scope: Optional[str] = typer.Option(None, "--scope", help="Filter by scope."),
+    kind: Optional[str] = typer.Option(None, "--kind", help="Filter by kind."),
+    session_id: Optional[str] = typer.Option(None, "--session-id", help="Filter by session id."),
+    limit: int = typer.Option(50, "--limit", min=1, help="Maximum rows to show."),
+) -> None:
+    """List memory records."""
+    settings = load_settings(project_dir=project_dir)
+    store = MemoryStore(settings.memory.resolved_db_path(project_dir))
+    store.initialize()
+    records = store.list_records(
+        scope=scope,  # type: ignore[arg-type]
+        kind=kind,  # type: ignore[arg-type]
+        project_dir=str(project_dir) if scope == "project" else None,
+        session_id=session_id,
+        limit=limit,
+    )
+    table = Table(title="Memory Records")
+    table.add_column("ID", style="bold")
+    table.add_column("Scope")
+    table.add_column("Kind")
+    table.add_column("Confidence", justify="right")
+    table.add_column("Source")
+    table.add_column("Content")
+    for record in records:
+        table.add_row(
+            record.id,
+            record.scope,
+            record.kind,
+            f"{record.confidence:.2f}",
+            record.source,
+            record.content,
+        )
+    console.print(table)
+
+
+@memory_app.command("search")
+def memory_search(
+    query: str = typer.Argument(..., help="Search query."),
+    project_dir: Path = typer.Option(
+        Path.cwd(),
+        "--project-dir",
+        "-C",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Project directory used for config discovery.",
+    ),
+    session_id: Optional[str] = typer.Option(None, "--session-id", help="Session id for session-scope search."),
+    limit: int = typer.Option(5, "--limit", min=1, help="Maximum hits to show."),
+) -> None:
+    """Search memory records with the Phase 2 local scorer."""
+    settings = load_settings(project_dir=project_dir)
+    store = MemoryStore(settings.memory.resolved_db_path(project_dir))
+    store.initialize()
+    hits = store.search_records(query=query, project_dir=str(project_dir), session_id=session_id, limit=limit)
+    table = Table(title="Memory Search")
+    table.add_column("ID", style="bold")
+    table.add_column("Scope")
+    table.add_column("Kind")
+    table.add_column("Score", justify="right")
+    table.add_column("Reason")
+    table.add_column("Content")
+    for hit in hits:
+        table.add_row(
+            hit.record.id,
+            hit.record.scope,
+            hit.record.kind,
+            f"{hit.score:.2f}",
+            hit.reason,
+            hit.record.content,
+        )
+    if not hits:
+        console.print("No memory hits.")
+        return
     console.print(table)
 
 
@@ -190,6 +329,7 @@ def config_show(
 
 app.add_typer(config_app, name="config")
 app.add_typer(inspect_app, name="inspect")
+app.add_typer(memory_app, name="memory")
 
 
 def _flatten(data: dict, prefix: str = "") -> dict[str, object]:

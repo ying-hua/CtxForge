@@ -21,12 +21,18 @@ class ContextBuilder:
         cwd: Path,
         skill_names: list[str] | None = None,
         extra_sections: list[ContextSection] | None = None,
+        include_memory_placeholders: bool = True,
     ) -> BuiltContext:
         max_tokens = self._settings.context.max_tokens
         reserved_output_tokens = self._settings.context.reserved_output_tokens
         input_budget = max(0, max_tokens - reserved_output_tokens)
 
-        sections = self._default_sections(task=task, cwd=cwd, skill_names=skill_names or [])
+        sections = self._default_sections(
+            task=task,
+            cwd=cwd,
+            skill_names=skill_names or [],
+            include_memory_placeholders=include_memory_placeholders,
+        )
         sections.extend(extra_sections or [])
         prepared = [self._with_estimate(section) for section in sort_sections(sections)]
         included, included_reports, dropped_reports, truncated_reports, overflow = self._fit_budget(
@@ -75,9 +81,16 @@ class ContextBuilder:
             snapshot=snapshot,
         )
 
-    def _default_sections(self, *, task: str, cwd: Path, skill_names: list[str]) -> list[ContextSection]:
+    def _default_sections(
+        self,
+        *,
+        task: str,
+        cwd: Path,
+        skill_names: list[str],
+        include_memory_placeholders: bool,
+    ) -> list[ContextSection]:
         skill_manifest = "\n".join(f"- {name}" for name in sorted(skill_names)) or "No selected skills."
-        return [
+        sections = [
             ContextSection(
                 name="runtime.system_prompt",
                 stability="stable",
@@ -115,20 +128,27 @@ class ContextBuilder:
                 source="project.placeholder",
                 content=f"Project directory name: {cwd.name}",
             ),
-            ContextSection(
-                name="memory.retrieved",
-                stability="dynamic",
-                priority=40,
-                source="memory.placeholder",
-                content="No retrieved memories in Phase 1.",
-            ),
-            ContextSection(
-                name="session.working_memory",
-                stability="dynamic",
-                priority=30,
-                source="memory.placeholder",
-                content="No working memory in Phase 1.",
-            ),
+        ]
+        if include_memory_placeholders:
+            sections.extend(
+                [
+                    ContextSection(
+                        name="memory.retrieved",
+                        stability="dynamic",
+                        priority=40,
+                        source="memory.placeholder",
+                        content="No retrieved memories in Phase 1.",
+                    ),
+                    ContextSection(
+                        name="session.working_memory",
+                        stability="dynamic",
+                        priority=30,
+                        source="memory.placeholder",
+                        content="No working memory in Phase 1.",
+                    ),
+                ]
+            )
+        sections.append(
             ContextSection(
                 name="request.task",
                 stability="dynamic",
@@ -137,7 +157,8 @@ class ContextBuilder:
                 required=True,
                 content=task,
             ),
-        ]
+        )
+        return sections
 
     def _with_estimate(self, section: ContextSection) -> ContextSection:
         return replace(section, content=section.content, token_estimate=estimate_tokens(render_section(section)))
