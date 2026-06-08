@@ -6,6 +6,8 @@ It is not another full coding agent. The goal is to provide reusable building
 blocks for agents that need stable context construction, layered memory, skill
 loading, and prefix-cache observability.
 
+Detailed design documents live in [docs/README.md](./docs/README.md).
+
 ## Phase 2
 
 The current implementation includes:

@@ -45,7 +45,21 @@ kind/scope/session filter + keyword overlap + recency + confidence
 
 这样可以先把 Memory 读写、注入和报告链路跑通，避免被向量扩展安装和 DeepSeek embedding 可用性阻塞。
 
-### 2.3 写入要保守
+### 2.3 为什么不是直接文件
+
+直接把记忆写成 JSON、JSONL 或普通文本文件也能工作，但它更适合极小规模、append-only 的记录，不适合 Phase 2 的目标。
+
+主要问题是：
+
+- 查询成本高。Memory 需要按 `scope / kind / session_id / project_dir / 关键词 / 时间` 过滤和排序，文件方案很快会退化成全量扫描加手写索引。
+- 一致性弱。working memory、session summary、long-term metadata 往往会一起更新，文件方案很难提供原子事务，容易出现半写入状态。
+- 扩展性差。后面加去重、embedding、来源追踪、统计字段时，文件格式会越来越像一个手工实现的数据库。
+- 检索可解释性差。Phase 2 需要返回命中原因和可排序结果，SQLite 天然适合保存结构化字段和评分依据。
+- 并发和维护更麻烦。即使当前是单用户本地工具，未来出现多进程或多轮运行时，文件锁和格式兼容都会变成额外负担。
+
+文件存储的优势主要是直观、易调试、适合一次性导出；但对 Phase 2 这种“可检索、可更新、可追踪、可扩展”的 Memory 层，SQLite 是更稳的中间层。
+
+### 2.4 写入要保守
 
 默认不把完整对话写入长期记忆。Phase 2 只保存调用方明确给出的事实、决策、摘要、偏好和工作状态。
 
@@ -60,7 +74,7 @@ kind/scope/session filter + keyword overlap + recency + confidence
 
 没有来源的长期记忆不应静默写入。
 
-### 2.4 检索结果必须可解释
+### 2.5 检索结果必须可解释
 
 Memory 检索不仅返回 content，还要返回命中原因，供 CLI、runtime report 和后续 TUI 展示。
 
