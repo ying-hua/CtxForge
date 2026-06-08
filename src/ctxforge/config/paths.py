@@ -17,3 +17,7 @@ def project_config_path(project_dir: Path | None = None) -> Path:
 
 def default_memory_db_path(project_dir: Path | None = None) -> Path:
     return (project_dir or Path.cwd()) / ".ctxforge" / "ctxforge.sqlite3"
+
+
+def default_skills_dir(project_dir: Path | None = None) -> Path:
+    return (project_dir or Path.cwd()) / "skills"

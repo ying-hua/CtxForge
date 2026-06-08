@@ -11,7 +11,7 @@ except ModuleNotFoundError:  # pragma: no cover - only used on Python < 3.11
 
 from pydantic import BaseModel, Field, field_validator
 
-from ctxforge.config.paths import default_memory_db_path, project_config_path, user_config_path
+from ctxforge.config.paths import default_memory_db_path, default_skills_dir, project_config_path, user_config_path
 
 
 class DeepSeekSettings(BaseModel):
@@ -33,6 +33,13 @@ class MemorySettings(BaseModel):
         return self.db_path or default_memory_db_path(project_dir)
 
 
+class SkillsSettings(BaseModel):
+    skills_dir: Optional[Path] = None
+
+    def resolved_skills_dir(self, project_dir: Path | None = None) -> Path:
+        return self.skills_dir or default_skills_dir(project_dir)
+
+
 class LoggingSettings(BaseModel):
     level: str = "INFO"
 
@@ -50,6 +57,7 @@ class CtxForgeSettings(BaseModel):
     deepseek: DeepSeekSettings = Field(default_factory=DeepSeekSettings)
     context: ContextSettings = Field(default_factory=ContextSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
+    skills: SkillsSettings = Field(default_factory=SkillsSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
 

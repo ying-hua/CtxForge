@@ -15,7 +15,8 @@ from ctxforge.config.settings import load_settings
 from ctxforge.context import ContextBuilder
 from ctxforge.logging import configure_logging
 from ctxforge.memory import MemoryRecord, MemoryStore
-from ctxforge.runtime.agent import RuntimeRequest, run_phase2
+from ctxforge.runtime.agent import RuntimeRequest, run_phase3
+from ctxforge.skills import SkillRegistry
 
 app = typer.Typer(
     name="ctxforge",
@@ -25,6 +26,7 @@ app = typer.Typer(
 config_app = typer.Typer(help="Inspect and manage CtxForge configuration.")
 inspect_app = typer.Typer(help="Inspect CtxForge runtime artifacts.")
 memory_app = typer.Typer(help="Inspect and manage CtxForge memory.")
+skill_app = typer.Typer(help="Inspect and manage CtxForge skills.")
 console = Console()
 
 
@@ -55,20 +57,25 @@ def run(
     ),
     session_id: Optional[str] = typer.Option(None, "--session-id", help="Reuse an existing session id."),
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="Override context token budget."),
+    skill_names: Optional[list[str]] = typer.Option(
+        None,
+        "--skill",
+        help="Explicitly activate a local skill by name. May be provided multiple times.",
+    ),
 ) -> None:
-    """Run a task through the Phase 2 memory-aware placeholder runtime."""
+    """Run a task through the Phase 3 memory-aware and skill-aware placeholder runtime."""
     settings = load_settings(
         project_dir=project_dir,
         cli_overrides={"context": {"max_tokens": max_tokens}} if max_tokens else None,
     )
     configure_logging(settings.logging.level)
 
-    result = run_phase2(
+    result = run_phase3(
         RuntimeRequest(
             task=task,
             cwd=project_dir,
             session_id=session_id,
-            skill_names=[],
+            skill_names=skill_names or [],
             max_tokens=max_tokens,
         ),
         settings=settings,
@@ -76,7 +83,7 @@ def run(
 
     console.print(Panel(result.answer, title="CtxForge", border_style="cyan"))
 
-    table = Table(title="Phase 2 Runtime Report")
+    table = Table(title="Phase 3 Runtime Report")
     table.add_column("Field", style="bold")
     table.add_column("Value")
     table.add_row("session_id", result.session_id)
@@ -91,7 +98,115 @@ def run(
     table.add_row("retrieved_memories", str(result.memory_report["retrieved_count"]))
     table.add_row("working_memory_items", str(result.memory_report["working_count"]))
     table.add_row("session_summary_present", str(bool(result.memory_report["summary_count"])))
+    table.add_row("skill_status", str(result.skill_report["status"]))
+    table.add_row("selected_skills", ", ".join(_selected_skill_names(result.skill_report)) or "none")
     console.print(table)
+
+
+@skill_app.command("list")
+def skill_list(
+    project_dir: Path = typer.Option(
+        Path.cwd(),
+        "--project-dir",
+        "-C",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Project directory used for config discovery.",
+    ),
+) -> None:
+    """List local project skills."""
+    settings = load_settings(project_dir=project_dir)
+    discovery = SkillRegistry(settings.skills.resolved_skills_dir(project_dir)).discover()
+    if not discovery.skills:
+        console.print("No skills found.")
+    else:
+        table = Table(title="Skills")
+        table.add_column("Name", style="bold")
+        table.add_column("Version")
+        table.add_column("Description")
+        table.add_column("Activation")
+        table.add_column("Tools")
+        for skill in discovery.skills:
+            table.add_row(
+                skill.name,
+                skill.manifest.version,
+                skill.manifest.description,
+                ", ".join(skill.manifest.activation) or "none",
+                ", ".join(skill.manifest.allowed_runtime_tools) or "none",
+            )
+        console.print(table)
+    _print_skill_errors(discovery.errors)
+
+
+@skill_app.command("inspect")
+def skill_inspect(
+    name: str = typer.Argument(..., help="Skill name to inspect."),
+    project_dir: Path = typer.Option(
+        Path.cwd(),
+        "--project-dir",
+        "-C",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Project directory used for config discovery.",
+    ),
+) -> None:
+    """Inspect a local project skill."""
+    settings = load_settings(project_dir=project_dir)
+    discovery = SkillRegistry(settings.skills.resolved_skills_dir(project_dir)).discover()
+    skill = next((candidate for candidate in discovery.skills if candidate.name == name), None)
+    if skill is None:
+        _print_skill_errors(discovery.errors)
+        console.print(f"Skill not found: {name}")
+        raise typer.Exit(code=1)
+
+    table = Table(title=f"Skill: {skill.name}")
+    table.add_column("Field", style="bold")
+    table.add_column("Value")
+    table.add_row("name", skill.name)
+    table.add_row("version", skill.manifest.version)
+    table.add_row("description", skill.manifest.description)
+    table.add_row("activation", ", ".join(skill.manifest.activation) or "none")
+    table.add_row("allowed_runtime_tools", ", ".join(skill.manifest.allowed_runtime_tools) or "none")
+    table.add_row("directory", str(skill.directory))
+    console.print(table)
+    console.print(Panel(skill.instructions, title="SKILL.md", border_style="cyan"))
+
+
+@skill_app.command("install")
+def skill_install(
+    source_dir: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Local skill directory containing skill.toml and SKILL.md.",
+    ),
+    project_dir: Path = typer.Option(
+        Path.cwd(),
+        "--project-dir",
+        "-C",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Project directory used for config discovery.",
+    ),
+    force: bool = typer.Option(False, "--force", help="Replace an existing installed skill with the same name."),
+) -> None:
+    """Install a local skill into the project skills directory."""
+    settings = load_settings(project_dir=project_dir)
+    registry = SkillRegistry(settings.skills.resolved_skills_dir(project_dir))
+    try:
+        installed = registry.install(source_dir, force=force)
+    except (FileExistsError, OSError, ValueError) as exc:
+        console.print(str(exc))
+        raise typer.Exit(code=1) from exc
+    console.print(f"Installed skill {installed.name} to {installed.directory}")
 
 
 @memory_app.command("add")
@@ -330,6 +445,7 @@ def config_show(
 app.add_typer(config_app, name="config")
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(memory_app, name="memory")
+app.add_typer(skill_app, name="skill")
 
 
 def _flatten(data: dict, prefix: str = "") -> dict[str, object]:
@@ -342,6 +458,33 @@ def _flatten(data: dict, prefix: str = "") -> dict[str, object]:
         else:
             rows[full_key] = value
     return rows
+
+
+def _selected_skill_names(skill_report: dict[str, object]) -> list[str]:
+    selected = skill_report.get("selected", [])
+    if not isinstance(selected, list):
+        return []
+    names = []
+    for item in selected:
+        if isinstance(item, dict) and isinstance(item.get("name"), str):
+            names.append(item["name"])
+        elif isinstance(item, str):
+            names.append(item)
+    return names
+
+
+def _print_skill_errors(errors: object) -> None:
+    if not errors:
+        return
+    table = Table(title="Skill Errors")
+    table.add_column("Path", style="bold")
+    table.add_column("Message")
+    for error in errors:
+        if hasattr(error, "path") and hasattr(error, "message"):
+            table.add_row(str(error.path), str(error.message))
+        elif isinstance(error, dict):
+            table.add_row(str(error.get("path", "")), str(error.get("message", "")))
+    console.print(table)
 
 
 def main() -> None:

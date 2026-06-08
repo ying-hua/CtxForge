@@ -20,6 +20,7 @@ class ContextBuilder:
         task: str,
         cwd: Path,
         skill_names: list[str] | None = None,
+        skill_manifest_content: str | None = None,
         extra_sections: list[ContextSection] | None = None,
         include_memory_placeholders: bool = True,
     ) -> BuiltContext:
@@ -31,6 +32,7 @@ class ContextBuilder:
             task=task,
             cwd=cwd,
             skill_names=skill_names or [],
+            skill_manifest_content=skill_manifest_content,
             include_memory_placeholders=include_memory_placeholders,
         )
         sections.extend(extra_sections or [])
@@ -87,9 +89,12 @@ class ContextBuilder:
         task: str,
         cwd: Path,
         skill_names: list[str],
+        skill_manifest_content: str | None,
         include_memory_placeholders: bool,
     ) -> list[ContextSection]:
-        skill_manifest = "\n".join(f"- {name}" for name in sorted(skill_names)) or "No selected skills."
+        skill_manifest = skill_manifest_content
+        if skill_manifest is None:
+            skill_manifest = "\n".join(f"- {name}" for name in sorted(skill_names)) or "No selected skills."
         sections = [
             ContextSection(
                 name="runtime.system_prompt",

@@ -8,7 +8,7 @@ loading, and prefix-cache observability.
 
 Detailed design documents live in [docs/README.md](./docs/README.md).
 
-## Phase 2
+## Phase 3
 
 The current implementation includes:
 
@@ -26,7 +26,11 @@ The current implementation includes:
 - long-term memory metadata storage and local keyword search
 - dynamic memory section injection into the context builder
 - `ctxforge memory add`, `ctxforge memory list`, and `ctxforge memory search`
-- placeholder skill, model, and cache diff paths for later phases
+- local skill manifest validation and discovery
+- `SKILL.md` loading and semi-stable context injection
+- explicit `--skill` selection and simple activation matching
+- `ctxforge skill list`, `ctxforge skill inspect`, and `ctxforge skill install`
+- placeholder model and cache diff paths for later phases
 
 ## Quick Start
 
@@ -35,7 +39,9 @@ python -m pip install -e ".[dev]"
 ctxforge config show
 ctxforge memory add "Use sqlite3 for early memory phases." --kind decision --source manual
 ctxforge memory search "sqlite memory"
+ctxforge skill list
 ctxforge run "Summarize the current project direction."
+ctxforge run "Review the current project direction." --skill code-review
 ctxforge inspect context "Summarize the current project direction."
 pytest -p no:cacheprovider
 ```
