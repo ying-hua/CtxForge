@@ -3,4 +3,5 @@ __pycache__/
 pytest-cache-files-*/
 .venv/
 .ctxforge/
+.env
 *.pyc

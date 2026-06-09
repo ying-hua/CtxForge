@@ -8,7 +8,7 @@ loading, and prefix-cache observability.
 
 Detailed design documents live in [docs/README.md](./docs/README.md).
 
-## Phase 3
+## Phase 4
 
 The current implementation includes:
 
@@ -30,17 +30,24 @@ The current implementation includes:
 - `SKILL.md` loading and semi-stable context injection
 - explicit `--skill` selection and simple activation matching
 - `ctxforge skill list`, `ctxforge skill inspect`, and `ctxforge skill install`
-- placeholder model and cache diff paths for later phases
+- DeepSeek Chat Completions client with mockable HTTP transport
+- real `ctxforge run` model calls when `DEEPSEEK_API_KEY` is configured
+- `--no-model` dry-run mode for offline context/memory/skill inspection
+- session summary persistence after successful model calls
+- model usage and prompt-cache usage fields in runtime reports
+- placeholder cache diff path for Phase 5
 
 ## Quick Start
 
 ```powershell
 python -m pip install -e ".[dev]"
 ctxforge config show
+$env:DEEPSEEK_API_KEY = "sk-..."
 ctxforge memory add "Use sqlite3 for early memory phases." --kind decision --source manual
 ctxforge memory search "sqlite memory"
 ctxforge skill list
 ctxforge run "Summarize the current project direction."
+ctxforge run "Summarize the current project direction." --no-model
 ctxforge run "Review the current project direction." --skill code-review
 ctxforge inspect context "Summarize the current project direction."
 pytest -p no:cacheprovider
@@ -51,7 +58,7 @@ pytest -p no:cacheprovider
 CtxForge loads configuration in this order:
 
 ```text
-defaults < user config < project config < environment < CLI flags
+defaults < user config < project config < project .env < environment < CLI flags
 ```
 
 User config:
@@ -66,11 +73,18 @@ Project config:
 ./ctxforge.toml
 ```
 
+Project `.env`:
+
+```text
+./.env
+```
+
 Environment variables:
 
 ```text
 DEEPSEEK_API_KEY
 CTXFORGE_DEEPSEEK_MODEL
 CTXFORGE_DEEPSEEK_BASE_URL
+CTXFORGE_DEEPSEEK_MAX_RETRIES
 CTXFORGE_LOG_LEVEL
 ```

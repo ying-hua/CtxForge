@@ -35,11 +35,12 @@ def test_memory_cli_add_search_and_run(tmp_path):
     assert search_result.exit_code == 0, search_result.output
     assert "Use sqlite3 for Phase 2 memory." in search_result.output
 
-    run_result = runner.invoke(app, ["run", "Please review Phase 2 memory work.", "-C", str(tmp_path)])
+    run_result = runner.invoke(app, ["run", "Please review Phase 2 memory work.", "-C", str(tmp_path), "--no-model"])
     assert run_result.exit_code == 0, run_result.output
-    assert "Phase 3 Runtime Report" in run_result.output
+    assert "Phase 4 Runtime Report" in run_result.output
     assert "memory_status" in run_result.output
     assert "skill_status" in run_result.output
+    assert "dry_run_no_model" in run_result.output
     assert "code-review" in run_result.output
 
 

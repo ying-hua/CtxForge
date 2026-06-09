@@ -13,9 +13,10 @@ from rich.table import Table
 
 from ctxforge.config.settings import load_settings
 from ctxforge.context import ContextBuilder
+from ctxforge.llm import DeepSeekAPIError, DeepSeekResponseError, MissingDeepSeekApiKey
 from ctxforge.logging import configure_logging
 from ctxforge.memory import MemoryRecord, MemoryStore
-from ctxforge.runtime.agent import RuntimeRequest, run_phase3
+from ctxforge.runtime.agent import RuntimeRequest, run_phase3, run_phase4
 from ctxforge.skills import SkillRegistry
 
 app = typer.Typer(
@@ -57,39 +58,59 @@ def run(
     ),
     session_id: Optional[str] = typer.Option(None, "--session-id", help="Reuse an existing session id."),
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="Override context token budget."),
+    max_output_tokens: Optional[int] = typer.Option(
+        None,
+        "--max-output-tokens",
+        help="Override model output token budget.",
+    ),
+    model: Optional[str] = typer.Option(None, "--model", help="Override the DeepSeek model for this run."),
+    no_model: bool = typer.Option(False, "--no-model", help="Build context without calling DeepSeek."),
     skill_names: Optional[list[str]] = typer.Option(
         None,
         "--skill",
         help="Explicitly activate a local skill by name. May be provided multiple times.",
     ),
 ) -> None:
-    """Run a task through the Phase 3 memory-aware and skill-aware placeholder runtime."""
+    """Run a task through the Phase 4 DeepSeek runtime."""
+    cli_overrides: dict[str, object] = {}
+    if max_tokens or max_output_tokens:
+        cli_overrides["context"] = {
+            "max_tokens": max_tokens,
+            "reserved_output_tokens": max_output_tokens,
+        }
+    if model:
+        cli_overrides["deepseek"] = {"model": model}
     settings = load_settings(
         project_dir=project_dir,
-        cli_overrides={"context": {"max_tokens": max_tokens}} if max_tokens else None,
+        cli_overrides=cli_overrides or None,
     )
     configure_logging(settings.logging.level)
 
-    result = run_phase3(
-        RuntimeRequest(
-            task=task,
-            cwd=project_dir,
-            session_id=session_id,
-            skill_names=skill_names or [],
-            max_tokens=max_tokens,
-        ),
-        settings=settings,
+    request = RuntimeRequest(
+        task=task,
+        cwd=project_dir,
+        session_id=session_id,
+        skill_names=skill_names or [],
+        max_tokens=max_tokens,
+        model=model,
+        max_output_tokens=max_output_tokens,
     )
+    try:
+        result = run_phase3(request, settings=settings) if no_model else run_phase4(request, settings=settings)
+    except (MissingDeepSeekApiKey, DeepSeekAPIError, DeepSeekResponseError) as exc:
+        console.print(str(exc))
+        raise typer.Exit(code=1) from exc
 
     console.print(Panel(result.answer, title="CtxForge", border_style="cyan"))
 
-    table = Table(title="Phase 3 Runtime Report")
+    table = Table(title="Phase 4 Runtime Report")
     table.add_column("Field", style="bold")
     table.add_column("Value")
     table.add_row("session_id", result.session_id)
     table.add_row("project_dir", str(project_dir))
-    table.add_row("model", settings.deepseek.model)
+    table.add_row("model", model or settings.deepseek.model)
     table.add_row("max_tokens", str(settings.context.max_tokens))
+    table.add_row("max_output_tokens", str(max_output_tokens or settings.context.reserved_output_tokens))
     table.add_row("input_budget", str(result.context_report["input_budget"]))
     table.add_row("context_tokens", str(result.context_report["total_estimated_tokens"]))
     table.add_row("stable_prefix_sha256", str(result.context_report["stable_prefix_sha256"]))
@@ -100,6 +121,22 @@ def run(
     table.add_row("session_summary_present", str(bool(result.memory_report["summary_count"])))
     table.add_row("skill_status", str(result.skill_report["status"]))
     table.add_row("selected_skills", ", ".join(_selected_skill_names(result.skill_report)) or "none")
+    llm_report = result.llm_report or {"status": "dry_run_no_model", "request_id": None, "finish_reason": None}
+    usage = llm_report.get("usage") if isinstance(llm_report.get("usage"), dict) else {}
+    table.add_row("llm_status", str(llm_report.get("status")))
+    table.add_row("llm_request_id", str(llm_report.get("request_id") or "none"))
+    table.add_row("finish_reason", str(llm_report.get("finish_reason") or "none"))
+    table.add_row("prompt_tokens", str(usage.get("prompt_tokens") if isinstance(usage, dict) else None))
+    table.add_row("completion_tokens", str(usage.get("completion_tokens") if isinstance(usage, dict) else None))
+    table.add_row(
+        "prompt_cache_hit_tokens",
+        str(usage.get("prompt_cache_hit_tokens") if isinstance(usage, dict) else None),
+    )
+    table.add_row(
+        "prompt_cache_miss_tokens",
+        str(usage.get("prompt_cache_miss_tokens") if isinstance(usage, dict) else None),
+    )
+    table.add_row("summary_written", str(llm_report.get("summary_written", False)))
     console.print(table)
 
 

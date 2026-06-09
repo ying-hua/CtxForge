@@ -10,6 +10,7 @@ This directory holds the project’s design and research documents.
 - [Phase 1 context builder design](./phase1-context-builder-design.md)
 - [Phase 2 memory design](./phase2-memory-design.md)
 - [Phase 3 skill design](./phase3-skill-design.md)
+- [Phase 4 DeepSeek runtime design](./phase4-deepseek-runtime-design.md)
 
 ## Notes
 

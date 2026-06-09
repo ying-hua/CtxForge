@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 try:
     import tomllib
@@ -17,8 +17,9 @@ from ctxforge.config.paths import default_memory_db_path, default_skills_dir, pr
 class DeepSeekSettings(BaseModel):
     api_key: Optional[str] = None
     base_url: str = "https://api.deepseek.com"
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-flash"
     timeout_seconds: float = Field(default=60.0, gt=0)
+    max_retries: int = Field(default=2, ge=0)
 
 
 class ContextSettings(BaseModel):
@@ -77,7 +78,8 @@ def load_settings(
     project_config = config_path or project_config_path(project_dir)
     merged = _deep_merge(merged, _read_toml(project_config))
 
-    merged = _deep_merge(merged, _env_overrides())
+    merged = _deep_merge(merged, _dotenv_overrides(project_dir))
+    merged = _deep_merge(merged, _env_overrides(os.environ))
 
     if cli_overrides:
         merged = _deep_merge(merged, _remove_none(cli_overrides))
@@ -95,17 +97,47 @@ def _read_toml(path: Path) -> dict[str, Any]:
     return data
 
 
-def _env_overrides() -> dict[str, Any]:
+def _read_dotenv(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def _dotenv_overrides(project_dir: Path) -> dict[str, Any]:
+    return _env_overrides(_read_dotenv(project_dir / ".env"))
+
+
+def _env_overrides(env: Mapping[str, str]) -> dict[str, Any]:
     data: dict[str, Any] = {}
 
-    if os.getenv("DEEPSEEK_API_KEY"):
-        data = _deep_merge(data, {"deepseek": {"api_key": os.environ["DEEPSEEK_API_KEY"]}})
-    if os.getenv("CTXFORGE_DEEPSEEK_MODEL"):
-        data = _deep_merge(data, {"deepseek": {"model": os.environ["CTXFORGE_DEEPSEEK_MODEL"]}})
-    if os.getenv("CTXFORGE_DEEPSEEK_BASE_URL"):
-        data = _deep_merge(data, {"deepseek": {"base_url": os.environ["CTXFORGE_DEEPSEEK_BASE_URL"]}})
-    if os.getenv("CTXFORGE_LOG_LEVEL"):
-        data = _deep_merge(data, {"logging": {"level": os.environ["CTXFORGE_LOG_LEVEL"]}})
+    if env.get("DEEPSEEK_API_KEY"):
+        data = _deep_merge(data, {"deepseek": {"api_key": env["DEEPSEEK_API_KEY"]}})
+    if env.get("CTXFORGE_DEEPSEEK_MODEL"):
+        data = _deep_merge(data, {"deepseek": {"model": env["CTXFORGE_DEEPSEEK_MODEL"]}})
+    if env.get("CTXFORGE_DEEPSEEK_BASE_URL"):
+        data = _deep_merge(data, {"deepseek": {"base_url": env["CTXFORGE_DEEPSEEK_BASE_URL"]}})
+    if env.get("CTXFORGE_DEEPSEEK_MAX_RETRIES"):
+        data = _deep_merge(data, {"deepseek": {"max_retries": env["CTXFORGE_DEEPSEEK_MAX_RETRIES"]}})
+    if env.get("CTXFORGE_LOG_LEVEL"):
+        data = _deep_merge(data, {"logging": {"level": env["CTXFORGE_LOG_LEVEL"]}})
 
     return data
 
