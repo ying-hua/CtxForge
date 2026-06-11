@@ -6,7 +6,7 @@ from pathlib import Path
 from ctxforge.config.settings import CtxForgeSettings
 from ctxforge.context.budget import estimate_tokens
 from ctxforge.context.models import BuiltContext, ContextReport, ContextSection, SectionReport
-from ctxforge.context.render import render_prompt, render_section, sort_sections
+from ctxforge.context.render import render_prompt, render_prompt_parts, render_section, sort_sections
 from ctxforge.context.snapshot import build_prefix_snapshot
 
 
@@ -42,7 +42,7 @@ class ContextBuilder:
             input_budget,
         )
 
-        rendered_prompt = render_prompt(included)
+        rendered_prompt, _ = render_prompt_parts(included)
         stable_sections = [section for section in included if section.stability == "stable"]
         stable_prefix = render_prompt(stable_sections)
         snapshot = build_prefix_snapshot(stable_prefix, included)

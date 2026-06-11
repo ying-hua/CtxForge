@@ -11,12 +11,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ctxforge.cache import CacheStore, normalize_project_key
 from ctxforge.config.settings import load_settings
 from ctxforge.context import ContextBuilder
 from ctxforge.llm import DeepSeekAPIError, DeepSeekResponseError, MissingDeepSeekApiKey
 from ctxforge.logging import configure_logging
 from ctxforge.memory import MemoryRecord, MemoryStore
-from ctxforge.runtime.agent import RuntimeRequest, run_phase3, run_phase4
+from ctxforge.runtime.agent import RuntimeRequest, run_phase5
 from ctxforge.skills import SkillRegistry
 
 app = typer.Typer(
@@ -71,7 +72,7 @@ def run(
         help="Explicitly activate a local skill by name. May be provided multiple times.",
     ),
 ) -> None:
-    """Run a task through the Phase 4 DeepSeek runtime."""
+    """Run a task through the Phase 5 DeepSeek and cache-report runtime."""
     cli_overrides: dict[str, object] = {}
     if max_tokens or max_output_tokens:
         cli_overrides["context"] = {
@@ -96,14 +97,18 @@ def run(
         max_output_tokens=max_output_tokens,
     )
     try:
-        result = run_phase3(request, settings=settings) if no_model else run_phase4(request, settings=settings)
+        result = run_phase5(
+            request,
+            settings=settings,
+            execute_model=not no_model,
+        )
     except (MissingDeepSeekApiKey, DeepSeekAPIError, DeepSeekResponseError) as exc:
         console.print(str(exc))
         raise typer.Exit(code=1) from exc
 
     console.print(Panel(result.answer, title="CtxForge", border_style="cyan"))
 
-    table = Table(title="Phase 4 Runtime Report")
+    table = Table(title="Phase 5 Runtime Report")
     table.add_column("Field", style="bold")
     table.add_column("Value")
     table.add_row("session_id", result.session_id)
@@ -114,6 +119,39 @@ def run(
     table.add_row("input_budget", str(result.context_report["input_budget"]))
     table.add_row("context_tokens", str(result.context_report["total_estimated_tokens"]))
     table.add_row("stable_prefix_sha256", str(result.context_report["stable_prefix_sha256"]))
+    table.add_row("cache_status", str(result.cache_report.get("status")))
+    table.add_row("cache_baseline_scope", str(result.cache_report.get("baseline_scope") or "none"))
+    table.add_row(
+        "cache_baseline_snapshot_id",
+        str(result.cache_report.get("baseline_snapshot_id") or "none"),
+    )
+    table.add_row("common_prefix_bytes", str(result.cache_report.get("common_prefix_bytes")))
+    table.add_row("changed_after_byte", str(result.cache_report.get("changed_after_byte")))
+    table.add_row(
+        "first_changed_section",
+        str(result.cache_report.get("first_changed_section") or "none"),
+    )
+    table.add_row("stable_prefix_changed", str(result.cache_report.get("stable_prefix_changed")))
+    table.add_row(
+        "estimated_cache_hit_ratio",
+        _format_ratio(result.cache_report.get("estimated_cache_hit_ratio")),
+    )
+    table.add_row(
+        "actual_cache_hit_ratio",
+        _format_ratio(result.cache_report.get("actual_cache_hit_ratio")),
+    )
+    table.add_row(
+        "prompt_cache_hit_tokens",
+        str(result.cache_report.get("prompt_cache_hit_tokens")),
+    )
+    table.add_row(
+        "prompt_cache_miss_tokens",
+        str(result.cache_report.get("prompt_cache_miss_tokens")),
+    )
+    table.add_row(
+        "cache_persistence_status",
+        str(result.cache_report.get("persistence_status")),
+    )
     table.add_row("memory_db_path", str(settings.memory.resolved_db_path(project_dir)))
     table.add_row("memory_status", str(result.memory_report["status"]))
     table.add_row("retrieved_memories", str(result.memory_report["retrieved_count"]))
@@ -128,14 +166,6 @@ def run(
     table.add_row("finish_reason", str(llm_report.get("finish_reason") or "none"))
     table.add_row("prompt_tokens", str(usage.get("prompt_tokens") if isinstance(usage, dict) else None))
     table.add_row("completion_tokens", str(usage.get("completion_tokens") if isinstance(usage, dict) else None))
-    table.add_row(
-        "prompt_cache_hit_tokens",
-        str(usage.get("prompt_cache_hit_tokens") if isinstance(usage, dict) else None),
-    )
-    table.add_row(
-        "prompt_cache_miss_tokens",
-        str(usage.get("prompt_cache_miss_tokens") if isinstance(usage, dict) else None),
-    )
     table.add_row("summary_written", str(llm_report.get("summary_written", False)))
     console.print(table)
 
@@ -448,6 +478,97 @@ def inspect_context(
         console.print(Panel(built.rendered_prompt, title="Rendered Prompt", border_style="cyan"))
 
 
+@inspect_app.command("cache")
+def inspect_cache(
+    project_dir: Path = typer.Option(
+        Path.cwd(),
+        "--project-dir",
+        "-C",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Project directory used for config discovery.",
+    ),
+    session_id: Optional[str] = typer.Option(None, "--session-id", help="Filter by session id."),
+    limit: int = typer.Option(20, "--limit", min=1, help="Maximum cache reports to show."),
+    as_json: bool = typer.Option(False, "--json", help="Print structured JSON."),
+    show_sections: bool = typer.Option(
+        False,
+        "--show-sections",
+        help="Show direct section changes and invalidated sections.",
+    ),
+) -> None:
+    """Inspect persisted Phase 5 cache reports without printing prompt content."""
+    settings = load_settings(project_dir=project_dir)
+    if not settings.cache.enabled:
+        console.print("Cache reporting is disabled.")
+        return
+
+    store = CacheStore(settings.memory.resolved_db_path(project_dir))
+    store.initialize()
+    entries = store.list_history(
+        project_key=normalize_project_key(project_dir),
+        session_id=session_id,
+        limit=limit,
+    )
+    if as_json:
+        typer.echo(json.dumps([entry.to_dict() for entry in entries], indent=2, ensure_ascii=False))
+        return
+    if not entries:
+        console.print("No cache snapshots found for this project.")
+        return
+
+    table = Table(title="Cache Reports")
+    table.add_column("Created At")
+    table.add_column("Session")
+    table.add_column("Model")
+    table.add_column("Status")
+    table.add_column("Baseline")
+    table.add_column("Prefix Bytes", justify="right")
+    table.add_column("First Change")
+    table.add_column("Estimated")
+    table.add_column("Actual")
+    table.add_column("Hit/Miss")
+    for entry in entries:
+        report = entry.report
+        table.add_row(
+            entry.snapshot.created_at.isoformat(timespec="seconds"),
+            entry.snapshot.session_id,
+            entry.snapshot.model,
+            report.status,
+            report.baseline_scope or "none",
+            str(report.common_prefix_bytes),
+            report.first_changed_section or "none",
+            _format_ratio(report.estimated_cache_hit_ratio),
+            _format_ratio(report.actual_cache_hit_ratio),
+            f"{report.prompt_cache_hit_tokens}/{report.prompt_cache_miss_tokens}",
+        )
+    console.print(table)
+
+    if show_sections:
+        changes = Table(title="Cache Section Changes")
+        changes.add_column("Snapshot")
+        changes.add_column("Type")
+        changes.add_column("Section")
+        changes.add_column("Stability")
+        changes.add_column("Invalidated")
+        for entry in entries:
+            invalidated = ", ".join(entry.report.invalidated_sections) or "none"
+            if not entry.report.direct_changes:
+                changes.add_row(entry.snapshot.id, "none", "none", "none", invalidated)
+                continue
+            for change in entry.report.direct_changes:
+                changes.add_row(
+                    entry.snapshot.id,
+                    change.change_type,
+                    change.name,
+                    change.stability or "none",
+                    invalidated,
+                )
+        console.print(changes)
+
+
 @config_app.command("show")
 def config_show(
     project_dir: Path = typer.Option(
@@ -508,6 +629,12 @@ def _selected_skill_names(skill_report: dict[str, object]) -> list[str]:
         elif isinstance(item, str):
             names.append(item)
     return names
+
+
+def _format_ratio(value: object) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "n/a"
+    return f"{value:.1%}"
 
 
 def _print_skill_errors(errors: object) -> None:

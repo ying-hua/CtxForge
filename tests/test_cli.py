@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
+
 from rich.console import Console
 from typer.testing import CliRunner
 
+from ctxforge.cache import CacheStore, analyze_cache, create_cache_snapshot, mark_persistence
 from ctxforge.cli import app as cli_app
 from ctxforge.cli.app import app
+from ctxforge.config.settings import CtxForgeSettings
+from ctxforge.context import ContextBuilder
 
 
 def test_memory_cli_add_search_and_run(tmp_path):
@@ -37,9 +42,10 @@ def test_memory_cli_add_search_and_run(tmp_path):
 
     run_result = runner.invoke(app, ["run", "Please review Phase 2 memory work.", "-C", str(tmp_path), "--no-model"])
     assert run_result.exit_code == 0, run_result.output
-    assert "Phase 4 Runtime Report" in run_result.output
+    assert "Phase 5 Runtime Report" in run_result.output
     assert "memory_status" in run_result.output
     assert "skill_status" in run_result.output
+    assert "cache_status" in run_result.output
     assert "dry_run_no_model" in run_result.output
     assert "code-review" in run_result.output
 
@@ -60,6 +66,42 @@ def test_skill_cli_list_inspect_and_install(tmp_path):
     inspect_result = runner.invoke(app, ["skill", "inspect", "writer", "-C", str(tmp_path)])
     assert inspect_result.exit_code == 0, inspect_result.output
     assert "Draft clearly." in inspect_result.output
+
+
+def test_inspect_cache_table_and_json_do_not_expose_prompt(tmp_path):
+    runner = CliRunner()
+    cli_app.console = Console(width=240, color_system=None)
+    settings = CtxForgeSettings()
+    built = ContextBuilder(settings).build(task="private prompt content", cwd=tmp_path)
+    snapshot = create_cache_snapshot(
+        built,
+        cwd=tmp_path,
+        session_id="session-1",
+        provider="deepseek",
+        base_url=settings.deepseek.base_url,
+        model=settings.deepseek.model,
+        snapshot_id="cache-1",
+    )
+    store = CacheStore(settings.memory.resolved_db_path(tmp_path))
+    store.initialize()
+    store.save(
+        snapshot,
+        mark_persistence(analyze_cache(snapshot, None), "saved"),
+        request_id="request-1",
+        retention=20,
+    )
+
+    table_result = runner.invoke(app, ["inspect", "cache", "-C", str(tmp_path)])
+    json_result = runner.invoke(app, ["inspect", "cache", "-C", str(tmp_path), "--json"])
+
+    assert table_result.exit_code == 0, table_result.output
+    assert "Cache Reports" in table_result.output
+    assert "session-1" in table_result.output
+    assert "private prompt content" not in table_result.output
+    assert json_result.exit_code == 0, json_result.output
+    payload = json.loads(json_result.output)
+    assert payload[0]["session_id"] == "session-1"
+    assert "private prompt content" not in json_result.output
 
 
 def _write_skill(tmp_path, *, name: str, activation: list[str], instructions: str):

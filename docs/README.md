@@ -11,6 +11,7 @@ This directory holds the project’s design and research documents.
 - [Phase 2 memory design](./phase2-memory-design.md)
 - [Phase 3 skill design](./phase3-skill-design.md)
 - [Phase 4 DeepSeek runtime design](./phase4-deepseek-runtime-design.md)
+- [Phase 5 prefix cache report design](./phase5-cache-report-design.md)
 
 ## Notes
 

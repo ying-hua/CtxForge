@@ -12,6 +12,10 @@ model = "deepseek-reasoner"
 [context]
 max_tokens = 8192
 
+[cache]
+snapshot_retention = 12
+allow_project_fallback = false
+
 [logging]
 level = "debug"
 """.strip(),
@@ -22,6 +26,8 @@ level = "debug"
 
     assert settings.deepseek.model == "deepseek-reasoner"
     assert settings.context.max_tokens == 8192
+    assert settings.cache.snapshot_retention == 12
+    assert settings.cache.allow_project_fallback is False
     assert settings.logging.level == "DEBUG"
 
 

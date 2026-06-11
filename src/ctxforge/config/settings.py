@@ -41,6 +41,12 @@ class SkillsSettings(BaseModel):
         return self.skills_dir or default_skills_dir(project_dir)
 
 
+class CacheSettings(BaseModel):
+    enabled: bool = True
+    snapshot_retention: int = Field(default=20, ge=1, le=1000)
+    allow_project_fallback: bool = True
+
+
 class LoggingSettings(BaseModel):
     level: str = "INFO"
 
@@ -59,6 +65,7 @@ class CtxForgeSettings(BaseModel):
     context: ContextSettings = Field(default_factory=ContextSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     skills: SkillsSettings = Field(default_factory=SkillsSettings)
+    cache: CacheSettings = Field(default_factory=CacheSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
 

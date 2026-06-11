@@ -8,7 +8,7 @@ loading, and prefix-cache observability.
 
 Detailed design documents live in [docs/README.md](./docs/README.md).
 
-## Phase 4
+## Phase 5
 
 The current implementation includes:
 
@@ -35,7 +35,13 @@ The current implementation includes:
 - `--no-model` dry-run mode for offline context/memory/skill inspection
 - session summary persistence after successful model calls
 - model usage and prompt-cache usage fields in runtime reports
-- placeholder cache diff path for Phase 5
+- full request snapshots with UTF-8 byte spans and ordered section fingerprints
+- local common-prefix analysis with estimated cache reuse ratios
+- DeepSeek cache hit/miss usage merged as a separate actual ratio
+- SQLite-backed cache snapshot history with configurable retention
+- same-session baseline selection with optional project fallback
+- `ctxforge inspect cache` history, JSON, and section-change inspection
+- cache observability failures isolated from successful model responses
 
 ## Quick Start
 
@@ -50,6 +56,7 @@ ctxforge run "Summarize the current project direction."
 ctxforge run "Summarize the current project direction." --no-model
 ctxforge run "Review the current project direction." --skill code-review
 ctxforge inspect context "Summarize the current project direction."
+ctxforge inspect cache
 pytest -p no:cacheprovider
 ```
 
@@ -87,4 +94,13 @@ CTXFORGE_DEEPSEEK_MODEL
 CTXFORGE_DEEPSEEK_BASE_URL
 CTXFORGE_DEEPSEEK_MAX_RETRIES
 CTXFORGE_LOG_LEVEL
+```
+
+Optional project cache configuration:
+
+```toml
+[cache]
+enabled = true
+snapshot_retention = 20
+allow_project_fallback = true
 ```
