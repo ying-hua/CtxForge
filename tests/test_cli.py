@@ -104,6 +104,50 @@ def test_inspect_cache_table_and_json_do_not_expose_prompt(tmp_path):
     assert "private prompt content" not in json_result.output
 
 
+def test_tui_cli_launches_textual_app_with_options(tmp_path, monkeypatch):
+    runner = CliRunner()
+    launched: dict[str, object] = {}
+
+    def fake_init(self, **kwargs):
+        launched.update(kwargs)
+
+    def fake_run(self):
+        launched["ran"] = True
+
+    monkeypatch.setattr("ctxforge.tui.app.CtxForgeTuiApp.__init__", fake_init)
+    monkeypatch.setattr("ctxforge.tui.app.CtxForgeTuiApp.run", fake_run)
+
+    result = runner.invoke(
+        app,
+        [
+            "tui",
+            "-C",
+            str(tmp_path),
+            "--session-id",
+            "session-tui",
+            "--model",
+            "deepseek-v4-flash",
+            "--max-tokens",
+            "4096",
+            "--max-output-tokens",
+            "512",
+            "--skill",
+            "review",
+            "--no-model",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert launched["project_dir"] == tmp_path.resolve()
+    assert launched["session_id"] == "session-tui"
+    assert launched["model"] == "deepseek-v4-flash"
+    assert launched["max_tokens"] == 4096
+    assert launched["max_output_tokens"] == 512
+    assert launched["skill_names"] == ["review"]
+    assert launched["execute_model"] is False
+    assert launched["ran"] is True
+
+
 def _write_skill(tmp_path, *, name: str, activation: list[str], instructions: str):
     return _write_skill_directory(tmp_path / "skills", name=name, activation=activation, instructions=instructions)
 

@@ -8,7 +8,7 @@ class DeepSeekError(RuntimeError):
 class MissingDeepSeekApiKey(DeepSeekError):
     def __init__(self) -> None:
         super().__init__(
-            'DEEPSEEK_API_KEY is required for Phase 4 model calls. '
+            'DEEPSEEK_API_KEY is required for model calls. '
             'Set $env:DEEPSEEK_API_KEY="sk-..." or run with --no-model.'
         )
 

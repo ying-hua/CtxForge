@@ -170,6 +170,71 @@ def run(
     console.print(table)
 
 
+@app.command()
+def tui(
+    project_dir: Path = typer.Option(
+        Path.cwd(),
+        "--project-dir",
+        "-C",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Project directory used for config discovery.",
+    ),
+    session_id: Optional[str] = typer.Option(None, "--session-id", help="Reuse an existing session id."),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="Override context token budget."),
+    max_output_tokens: Optional[int] = typer.Option(
+        None,
+        "--max-output-tokens",
+        help="Override model output token budget.",
+    ),
+    model: Optional[str] = typer.Option(None, "--model", help="Override the DeepSeek model."),
+    no_model: bool = typer.Option(False, "--no-model", help="Run the TUI without calling DeepSeek."),
+    skill_names: Optional[list[str]] = typer.Option(
+        None,
+        "--skill",
+        help="Explicitly activate a local skill by name. May be provided multiple times.",
+    ),
+) -> None:
+    """Launch the Phase 6 Textual interface."""
+    cli_overrides: dict[str, object] = {}
+    if max_tokens or max_output_tokens:
+        cli_overrides["context"] = {
+            "max_tokens": max_tokens,
+            "reserved_output_tokens": max_output_tokens,
+        }
+    if model:
+        cli_overrides["deepseek"] = {"model": model}
+    settings = load_settings(
+        project_dir=project_dir,
+        cli_overrides=cli_overrides or None,
+    )
+    configure_logging(settings.logging.level)
+
+    try:
+        from ctxforge.tui.app import CtxForgeTuiApp
+    except ModuleNotFoundError as exc:
+        if exc.name != "textual" and not (exc.name or "").startswith("textual."):
+            raise
+        console.print(
+            "Textual is required for `ctxforge tui`.\n"
+            'Install it with: python -m pip install -e ".[tui]"'
+        )
+        raise typer.Exit(code=1) from exc
+
+    CtxForgeTuiApp(
+        settings=settings,
+        project_dir=project_dir,
+        session_id=session_id,
+        model=model,
+        max_tokens=max_tokens,
+        max_output_tokens=max_output_tokens,
+        skill_names=skill_names or [],
+        execute_model=not no_model,
+    ).run()
+
+
 @skill_app.command("list")
 def skill_list(
     project_dir: Path = typer.Option(

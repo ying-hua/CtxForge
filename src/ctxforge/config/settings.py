@@ -47,6 +47,12 @@ class CacheSettings(BaseModel):
     allow_project_fallback: bool = True
 
 
+class TuiSettings(BaseModel):
+    response_refresh_ms: int = Field(default=40, ge=16, le=500)
+    max_visible_turns: int = Field(default=20, ge=1, le=200)
+    show_full_memory_content: bool = False
+
+
 class LoggingSettings(BaseModel):
     level: str = "INFO"
 
@@ -66,6 +72,7 @@ class CtxForgeSettings(BaseModel):
     memory: MemorySettings = Field(default_factory=MemorySettings)
     skills: SkillsSettings = Field(default_factory=SkillsSettings)
     cache: CacheSettings = Field(default_factory=CacheSettings)
+    tui: TuiSettings = Field(default_factory=TuiSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
 

@@ -7,6 +7,8 @@ from typing import Protocol
 from uuid import uuid4
 
 from ctxforge.cache import (
+    CacheReport,
+    CacheSnapshot,
     CacheStore,
     ProviderCacheUsage,
     analyze_cache,
@@ -63,6 +65,16 @@ class PreparedRuntime:
     selected_skill_names: list[str]
     previous_summary: SessionSummary | None
     memory_store: MemoryStore
+
+
+@dataclass(frozen=True)
+class PreparedRun:
+    prepared_runtime: PreparedRuntime
+    cache_snapshot: CacheSnapshot
+    cache_report: CacheReport
+    model: str
+    settings: CtxForgeSettings
+    active_cache_store: CacheStore | None
 
 
 def run_phase4(
@@ -132,6 +144,38 @@ def run_phase5(
     cache_store: CacheStore | None = None,
 ) -> RuntimeResult:
     """Run the Phase 5 runtime with local prefix analysis and persisted cache reports."""
+    prepared_run = prepare_runtime_run(request, settings, cache_store=cache_store)
+
+    if not execute_model:
+        return build_dry_run_result(prepared_run)
+
+    chat_client = client or DeepSeekClient(prepared_run.settings.deepseek)
+    completion = chat_client.complete(
+        ChatCompletionRequest(
+            model=prepared_run.model,
+            messages=prepared_run.prepared_runtime.context.messages,
+            max_tokens=(
+                request.max_output_tokens
+                or prepared_run.settings.context.reserved_output_tokens
+            ),
+            stream=False,
+        )
+    )
+    return finalize_runtime_success(
+        prepared_run,
+        completion,
+        request=request,
+        summary_source="runtime.phase5.local_summary",
+    )
+
+
+
+def prepare_runtime_run(
+    request: RuntimeRequest,
+    settings: CtxForgeSettings,
+    *,
+    cache_store: CacheStore | None = None,
+) -> PreparedRun:
     session_id = request.session_id or f"session-{uuid4().hex[:12]}"
     effective_settings = _effective_settings(request, settings)
     prepared = _prepare_runtime(request, effective_settings, session_id=session_id)
@@ -147,7 +191,9 @@ def run_phase5(
 
     active_cache_store: CacheStore | None = None
     if effective_settings.cache.enabled:
-        active_cache_store = cache_store or CacheStore(effective_settings.memory.resolved_db_path(request.cwd))
+        active_cache_store = cache_store or CacheStore(
+            effective_settings.memory.resolved_db_path(request.cwd)
+        )
         try:
             active_cache_store.initialize()
             baseline = active_cache_store.find_baseline(
@@ -169,44 +215,56 @@ def run_phase5(
     else:
         cache_report = disabled_cache_report(cache_snapshot)
 
-    if not execute_model:
-        if cache_report.status != "disabled":
-            cache_report = mark_dry_run(cache_report)
-        return RuntimeResult(
-            answer=(
-                "Phase 5 cache report dry run is ready. "
-                "Context, memory, skills, and local prefix analysis were built without calling DeepSeek."
-            ),
-            session_id=session_id,
-            context_report={
-                **prepared.context.report.to_dict(),
-                "selected_skills": prepared.selected_skill_names,
-            },
-            cache_report=cache_report.to_dict(),
-            memory_report=prepared.memory_report,
-            skill_report=prepared.skill_report,
-            llm_report={
-                "status": "dry_run_no_model",
-                "provider": "deepseek",
-                "model": model,
-                "request_id": None,
-                "finish_reason": None,
-                "usage": {},
-                "summary_written": False,
-            },
-        )
-
-    chat_client = client or DeepSeekClient(effective_settings.deepseek)
-    completion = chat_client.complete(
-        ChatCompletionRequest(
-            model=model,
-            messages=prepared.context.messages,
-            max_tokens=request.max_output_tokens or effective_settings.context.reserved_output_tokens,
-            stream=False,
-        )
+    return PreparedRun(
+        prepared_runtime=prepared,
+        cache_snapshot=cache_snapshot,
+        cache_report=cache_report,
+        model=model,
+        settings=effective_settings,
+        active_cache_store=active_cache_store,
     )
+
+
+def build_dry_run_result(prepared_run: PreparedRun) -> RuntimeResult:
+    cache_report = prepared_run.cache_report
+    if cache_report.status != "disabled":
+        cache_report = mark_dry_run(cache_report)
+    prepared = prepared_run.prepared_runtime
+    return RuntimeResult(
+        answer=(
+            "CtxForge runtime dry run is ready. "
+            "Context, memory, skills, and local prefix analysis were built without calling DeepSeek."
+        ),
+        session_id=prepared.session_id,
+        context_report={
+            **prepared.context.report.to_dict(),
+            "selected_skills": prepared.selected_skill_names,
+        },
+        cache_report=cache_report.to_dict(),
+        memory_report=prepared.memory_report,
+        skill_report=prepared.skill_report,
+        llm_report={
+            "status": "dry_run_no_model",
+            "provider": "deepseek",
+            "model": prepared_run.model,
+            "request_id": None,
+            "finish_reason": None,
+            "usage": {},
+            "summary_written": False,
+        },
+    )
+
+
+def finalize_runtime_success(
+    prepared_run: PreparedRun,
+    completion: ChatCompletionResult,
+    *,
+    request: RuntimeRequest,
+    summary_source: str,
+) -> RuntimeResult:
+    prepared = prepared_run.prepared_runtime
     cache_report = attach_provider_usage(
-        cache_report,
+        prepared_run.cache_report,
         ProviderCacheUsage(
             prompt_tokens=completion.usage.prompt_tokens,
             hit_tokens=completion.usage.prompt_cache_hit_tokens,
@@ -214,14 +272,14 @@ def run_phase5(
         ),
     )
 
-    if effective_settings.cache.enabled and active_cache_store is not None:
+    if prepared_run.settings.cache.enabled and prepared_run.active_cache_store is not None:
         persisted_report = mark_persistence(cache_report, "saved")
         try:
-            active_cache_store.save(
-                cache_snapshot,
+            prepared_run.active_cache_store.save(
+                prepared_run.cache_snapshot,
                 persisted_report,
                 request_id=completion.request_id,
-                retention=effective_settings.cache.snapshot_retention,
+                retention=prepared_run.settings.cache.snapshot_retention,
             )
             cache_report = persisted_report
         except Exception as exc:
@@ -239,17 +297,24 @@ def run_phase5(
         memory_report=prepared.memory_report,
         previous_summary=prepared.previous_summary.summary if prepared.previous_summary else None,
     )
-    prepared.memory_store.upsert_session_summary(
-        session_id=session_id,
-        project_dir=str(request.cwd),
-        summary=summary,
-        source="runtime.phase5.local_summary",
-        turn_count=(prepared.previous_summary.turn_count + 1) if prepared.previous_summary else 1,
-    )
+    summary_written = False
+    summary_error = None
+    try:
+        prepared.memory_store.upsert_session_summary(
+            session_id=prepared.session_id,
+            project_dir=str(request.cwd),
+            summary=summary,
+            source=summary_source,
+            turn_count=(prepared.previous_summary.turn_count + 1) if prepared.previous_summary else 1,
+        )
+        summary_written = True
+    except Exception as exc:
+        logger.warning("Session summary persistence failed: %s", exc)
+        summary_error = f"summary_write_failed: {exc}"
 
     return RuntimeResult(
         answer=completion.answer,
-        session_id=session_id,
+        session_id=prepared.session_id,
         context_report={
             **prepared.context.report.to_dict(),
             "selected_skills": prepared.selected_skill_names,
@@ -257,7 +322,11 @@ def run_phase5(
         cache_report=cache_report.to_dict(),
         memory_report=prepared.memory_report,
         skill_report=prepared.skill_report,
-        llm_report={**completion.report(), "summary_written": True},
+        llm_report={
+            **completion.report(),
+            "summary_written": summary_written,
+            "summary_error": summary_error,
+        },
     )
 
 

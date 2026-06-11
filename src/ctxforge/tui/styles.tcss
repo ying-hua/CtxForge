@@ -1,0 +1,94 @@
+Screen {
+    layout: vertical;
+}
+
+#status-bar {
+    height: 1;
+    padding: 0 1;
+    background: $boost;
+    color: $text-muted;
+}
+
+#main-body {
+    height: 1fr;
+}
+
+#observability {
+    width: 42%;
+    min-width: 42;
+    padding: 0 1 0 0;
+}
+
+.observability-panel {
+    border: round $primary-darken-1;
+    padding: 0 1;
+    height: 1fr;
+}
+
+#response-panel {
+    width: 1fr;
+    border: round $accent;
+    padding: 0 1;
+}
+
+.panel-title {
+    height: 1;
+    text-style: bold;
+    color: $accent;
+}
+
+.panel-summary {
+    height: auto;
+    color: $text-muted;
+}
+
+#context-sections,
+#memory-hits {
+    height: 1fr;
+}
+
+#response-scroll {
+    height: 1fr;
+    margin: 1 0;
+}
+
+#response-body {
+    width: 100%;
+    height: auto;
+}
+
+#input-bar {
+    height: 3;
+    padding: 0 1;
+}
+
+#task-input {
+    width: 1fr;
+}
+
+#run-button,
+#stop-button {
+    width: 10;
+    margin-left: 1;
+}
+
+Screen.narrow #main-body {
+    layout: vertical;
+}
+
+Screen.narrow #observability {
+    width: 100%;
+    height: 45%;
+    layout: horizontal;
+    padding: 0;
+}
+
+Screen.narrow .observability-panel {
+    width: 1fr;
+    height: 100%;
+}
+
+Screen.narrow #response-panel {
+    width: 100%;
+    height: 1fr;
+}

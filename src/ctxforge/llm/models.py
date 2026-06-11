@@ -33,6 +33,15 @@ class ChatCompletionRequest:
 
 
 @dataclass(frozen=True)
+class ChatStreamChunk:
+    content_delta: str = ""
+    model: str | None = None
+    request_id: str | None = None
+    finish_reason: str | None = None
+    usage: ChatUsage | None = None
+
+
+@dataclass(frozen=True)
 class ChatCompletionResult:
     answer: str
     model: str

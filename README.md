@@ -8,7 +8,7 @@ loading, and prefix-cache observability.
 
 Detailed design documents live in [docs/README.md](./docs/README.md).
 
-## Phase 5
+## Phase 6
 
 The current implementation includes:
 
@@ -42,6 +42,15 @@ The current implementation includes:
 - same-session baseline selection with optional project fallback
 - `ctxforge inspect cache` history, JSON, and section-change inspection
 - cache observability failures isolated from successful model responses
+- optional Textual TUI installed through the `tui` or `dev` extra
+- `ctxforge tui` with reusable session id and model/skill/budget options
+- runtime events for prepared reports, response deltas, completion, failure, and cancellation
+- DeepSeek SSE streaming with usage-only chunk support
+- streaming retry only before the first emitted chunk
+- context, memory, cache, and response panels in one terminal interface
+- throttled response rendering and explicit Run/Stop controls
+- cancellation that preserves the visible partial answer without writing cache or summary state
+- headless Textual coverage for wide and narrow terminal sizes
 
 ## Quick Start
 
@@ -55,6 +64,8 @@ ctxforge skill list
 ctxforge run "Summarize the current project direction."
 ctxforge run "Summarize the current project direction." --no-model
 ctxforge run "Review the current project direction." --skill code-review
+ctxforge tui
+ctxforge tui --no-model
 ctxforge inspect context "Summarize the current project direction."
 ctxforge inspect cache
 pytest -p no:cacheprovider
@@ -103,4 +114,9 @@ Optional project cache configuration:
 enabled = true
 snapshot_retention = 20
 allow_project_fallback = true
+
+[tui]
+response_refresh_ms = 40
+max_visible_turns = 20
+show_full_memory_content = false
 ```

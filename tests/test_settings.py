@@ -16,6 +16,11 @@ max_tokens = 8192
 snapshot_retention = 12
 allow_project_fallback = false
 
+[tui]
+response_refresh_ms = 75
+max_visible_turns = 8
+show_full_memory_content = true
+
 [logging]
 level = "debug"
 """.strip(),
@@ -28,6 +33,9 @@ level = "debug"
     assert settings.context.max_tokens == 8192
     assert settings.cache.snapshot_retention == 12
     assert settings.cache.allow_project_fallback is False
+    assert settings.tui.response_refresh_ms == 75
+    assert settings.tui.max_visible_turns == 8
+    assert settings.tui.show_full_memory_content is True
     assert settings.logging.level == "DEBUG"
 
 
